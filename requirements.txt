@@ -1,0 +1,11 @@
+# Humanizer has NO required dependencies — everything runs on the Python
+# standard library (3.9+). This file is intentionally (almost) empty.
+#
+# The high-quality "llm"/"hybrid" modes need a local model server instead of a
+# Python package:
+#   * Ollama         -> https://ollama.com/download   (recommended for AMD GPUs)
+#   * or any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...)
+#
+# Optional, only if you want to run the test suite via pytest instead of the
+# built-in runner:
+#   pytest>=7.0
