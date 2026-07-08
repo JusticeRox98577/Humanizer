@@ -11,12 +11,13 @@ Public API:
 
 from __future__ import annotations
 
-from .humanize import HumanizeResult, humanize
+from .humanize import HumanizeResult, humanize, humanize_docx
 from .llm import LLMConfig, LLMError, LocalLLM
 from .score import Score, score, verdict
 
 __all__ = [
     "humanize",
+    "humanize_docx",
     "HumanizeResult",
     "LocalLLM",
     "LLMConfig",

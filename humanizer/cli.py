@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 from . import extract, writeback
-from .humanize import humanize
+from .humanize import humanize, humanize_docx
 from .llm import LLMConfig, LocalLLM
 from .score import score, verdict
 
@@ -93,13 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         build_parser().print_help()
         return 1
 
-    text = _read_input(args.input)
-    if not text.strip():
-        print("No input text.", file=sys.stderr)
-        return 1
-
     if args.score:
-        _print_score("INPUT", text, stream=sys.stdout)
+        _print_score("INPUT", _read_input(args.input), stream=sys.stdout)
         return 0
 
     base_url = args.base_url or (
@@ -113,6 +108,41 @@ def main(argv: list[str] | None = None) -> int:
             temperature=args.temperature,
         )
     )
+
+    input_is_docx = (
+        bool(args.input)
+        and args.input != "-"
+        and str(args.input).lower().endswith(".docx")
+    )
+
+    # .docx in -> .docx out keeps ALL formatting (headings, bold, tables, ...).
+    if input_is_docx:
+        out_path = args.output or (
+            str(Path(args.input).with_suffix("")) + ".humanized.docx"
+        )
+        if out_path.lower().endswith(".docx"):
+            raw = Path(args.input).read_bytes()
+            new_bytes, result = humanize_docx(
+                raw,
+                mode=args.mode,
+                llm=llm,
+                seed=args.seed,
+                burstiness_strength=args.burstiness,
+            )
+            Path(out_path).write_bytes(new_bytes)
+            for w in result.warnings:
+                print(f"! {w}", file=sys.stderr)
+            print(f"Wrote {out_path} (formatting preserved)", file=sys.stderr)
+            if not args.quiet:
+                _print_score("BEFORE", result.original)
+                _print_score("AFTER", result.humanized)
+                print(f"\n=> {result.summary()}  [mode: {result.mode}]", file=sys.stderr)
+            return 0
+
+    text = _read_input(args.input)
+    if not text.strip():
+        print("No input text.", file=sys.stderr)
+        return 1
 
     result = humanize(
         text,

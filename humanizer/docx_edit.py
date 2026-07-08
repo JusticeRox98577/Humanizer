@@ -1,0 +1,124 @@
+"""Formatting-preserving humanization of .docx files.
+
+Regenerating a Word document from extracted plain text throws away everything
+that makes it a document: headings, bold/italic, fonts, colours, lists, tables,
+images, spacing. To keep all of that, we do **not** rebuild the file. Instead we:
+
+1. Open the original .docx (a ZIP) and read ``word/document.xml``.
+2. Walk it paragraph by paragraph, pull out each paragraph's visible text,
+   humanize just that text, and write the result back into the paragraph's
+   existing runs — putting the rewritten text into the first text run (keeping
+   its formatting) and blanking the rest.
+3. Re-zip the archive copying **every other part byte-for-byte**, replacing only
+   ``word/document.xml``.
+
+Because we only ever change the characters inside ``<w:t>`` elements and never
+re-serialize the XML tree, all run/paragraph properties, namespaces, images and
+tables survive exactly as they were.
+
+Short paragraphs (headings, labels, table headers — anything under ``min_words``)
+are left untouched so titles don't get mangled.
+"""
+
+from __future__ import annotations
+
+import io
+import re
+import zipfile
+from xml.sax.saxutils import escape, unescape
+
+# Matches, in document order:
+#   * a paragraph open tag  <w:p ...>   (selfclose captured for <w:p/>)
+#   * a paragraph close tag </w:p>
+#   * a text element        <w:t ...>text</w:t>   (self-closing <w:t/> excluded
+#     via the (?<!/) lookbehind so it isn't mistaken for an open tag)
+# \b after "w:t"/"w:p" stops it matching <w:tab>, <w:tbl>, <w:pPr>, etc.
+_TAG_RE = re.compile(
+    r"(?P<popen><w:p\b[^>]*?(?P<selfclose>/?)>)"
+    r"|(?P<pclose></w:p>)"
+    r"|(?P<t><w:t\b[^>]*?(?<!/)>(?P<ttext>.*?)</w:t>)",
+    re.S,
+)
+
+
+def _rewrite_document_xml(xml: str, rewrite_fn, min_words: int):
+    """Return (new_xml, original_text, new_text).
+
+    ``rewrite_fn`` maps one paragraph's plain text to its humanized version.
+    """
+    stack: list[list[tuple[int, int, str]]] = []
+    paragraphs: list[list[tuple[int, int, str]]] = []
+
+    for m in _TAG_RE.finditer(xml):
+        if m.group("popen") is not None:
+            if m.group("selfclose") == "/":
+                continue  # <w:p/> — empty paragraph, nothing to do
+            stack.append([])
+        elif m.group("pclose") is not None:
+            if stack:
+                paragraphs.append(stack.pop())
+        else:  # a <w:t> text node
+            if stack:
+                stack[-1].append((m.start("t"), m.end("t"), m.group("ttext")))
+
+    replacements: list[tuple[int, int, str]] = []
+    orig_parts: list[str] = []
+    new_parts: list[str] = []
+
+    for tnodes in paragraphs:
+        if not tnodes:
+            continue
+        text = "".join(unescape(t[2]) for t in tnodes)
+        orig_parts.append(text)
+
+        if not text.strip() or len(text.split()) < min_words:
+            new_parts.append(text)  # leave headings / short lines alone
+            continue
+
+        newtext = rewrite_fn(text)
+        new_parts.append(newtext)
+
+        # Put all rewritten text into the run that originally held the most
+        # text (its formatting is the paragraph's dominant style), and empty
+        # the rest. This avoids, e.g., a short bold lead-in word making the
+        # whole rewritten paragraph bold.
+        target = max(range(len(tnodes)), key=lambda i: len(tnodes[i][2]))
+        for i, (s, e, _) in enumerate(tnodes):
+            body = escape(newtext) if i == target else ""
+            replacements.append((s, e, '<w:t xml:space="preserve">' + body + "</w:t>"))
+
+    # Apply edits right-to-left so earlier offsets stay valid.
+    replacements.sort(key=lambda r: r[0], reverse=True)
+    out = xml
+    for s, e, rep in replacements:
+        out = out[:s] + rep + out[e:]
+
+    return out, "\n".join(orig_parts), "\n".join(new_parts)
+
+
+def humanize_docx_bytes(raw: bytes, rewrite_fn, *, min_words: int = 5):
+    """Humanize a .docx (given as bytes), preserving all formatting.
+
+    Returns ``(new_docx_bytes, original_text, humanized_text)``.
+    """
+    src = zipfile.ZipFile(io.BytesIO(raw))
+    try:
+        document = src.read("word/document.xml").decode("utf-8")
+    except KeyError as exc:
+        src.close()
+        raise ValueError("Not a valid .docx (missing word/document.xml).") from exc
+
+    new_document, orig_text, new_text = _rewrite_document_xml(
+        document, rewrite_fn, min_words
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "word/document.xml":
+                data = new_document.encode("utf-8")
+            # Preserve each part's original ZipInfo (name, date, compression).
+            dst.writestr(item, data)
+    src.close()
+    return buf.getvalue(), orig_text, new_text

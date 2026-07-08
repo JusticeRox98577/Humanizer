@@ -88,12 +88,26 @@ ollama pull gemma2:27b               # heavier, higher quality (q4)
 ### 3. Humanize
 
 ```bash
-# Uses hybrid mode (LLM + cleanup) by default
+# .docx in -> .docx out, with ALL formatting preserved.
+# (With no -o, it writes essay.humanized.docx next to the original.)
 python -m humanizer essay.docx -o essay.humanized.docx
 
 # Pick a different model
 python -m humanizer essay.docx --model llama3.1:8b-instruct
 ```
+
+### Your Word formatting is kept
+
+When you humanize a `.docx`, the tool edits your **original document in place** —
+it never rebuilds it from plain text. Headings, bold/italic, fonts, colours,
+bullet/numbered lists, tables and images all survive; only the words inside each
+paragraph change. Short lines (headings, labels — anything under ~5 words) are
+left exactly as they were so your titles don't get reworded.
+
+One caveat: if a single paragraph mixes formatting (say, one bold word in the
+middle of a normal sentence), the rewritten paragraph takes on that paragraph's
+*dominant* run formatting, since the words themselves change and can't be mapped
+back one-to-one. Uniformly-formatted paragraphs come back pixel-perfect.
 
 ### Prefer LM Studio / llama.cpp / vLLM instead?
 
@@ -189,7 +203,8 @@ docstrings for the full breakdown.
 humanizer/
   data.py        word/phrase/synonym maps (the rule knowledge base)
   extract.py     read .docx/.txt/.md (stdlib zip+xml, no python-docx)
-  writeback.py   write clean .docx/.txt (stdlib)
+  writeback.py   write a plain .docx/.txt from scratch (stdlib)
+  docx_edit.py   formatting-preserving in-place .docx rewrite (stdlib)
   transforms.py  the rule engine (phrases, transitions, contractions, burstiness)
   score.py       AI-likeness heuristic (burstiness / perplexity proxy / tells)
   llm.py         local LLM client (Ollama native + OpenAI-compatible)

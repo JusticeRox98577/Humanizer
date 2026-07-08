@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import extract
-from .humanize import humanize
+from .humanize import humanize, humanize_docx
 from .llm import LLMConfig, LocalLLM
 from .score import verdict
 from .writeback import _CONTENT_TYPES, _DOC_HEAD, _DOC_TAIL, _RELS, _paragraph_xml
@@ -120,16 +120,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_humanize(self):
         d = self._read_json()
-        if d.get("file_b64"):
-            raw = base64.b64decode(d["file_b64"])
-            text = extract.extract_bytes(raw, d.get("filename", "upload.txt"))
-        else:
-            text = d.get("text", "")
-        if not text.strip():
-            self._json(400, {"error": "No input text."})
-            return
+        mode = d.get("mode", "hybrid")
+        llm = self._llm_from(d)
+        filename = d.get("filename", "")
+        docx_b64 = None
 
-        result = humanize(text, mode=d.get("mode", "hybrid"), llm=self._llm_from(d))
+        if d.get("file_b64") and filename.lower().endswith(".docx"):
+            # Formatting-preserving path: rewrite the .docx in place.
+            raw = base64.b64decode(d["file_b64"])
+            new_bytes, result = humanize_docx(raw, mode=mode, llm=llm)
+            docx_b64 = base64.b64encode(new_bytes).decode("ascii")
+        else:
+            if d.get("file_b64"):
+                raw = base64.b64decode(d["file_b64"])
+                text = extract.extract_bytes(raw, filename or "upload.txt")
+            else:
+                text = d.get("text", "")
+            if not text.strip():
+                self._json(400, {"error": "No input text."})
+                return
+            result = humanize(text, mode=mode, llm=llm)
+
         self._json(
             200,
             {
@@ -141,6 +152,7 @@ class Handler(BaseHTTPRequestHandler):
                 "after_verdict": verdict(result.after.ai_like),
                 "warnings": result.warnings,
                 "summary": result.summary(),
+                "docx_b64": docx_b64,
             },
         )
 

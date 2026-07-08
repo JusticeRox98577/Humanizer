@@ -11,7 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from humanizer import extract, humanize, score, transforms, writeback  # noqa: E402
+import io  # noqa: E402
+import zipfile  # noqa: E402
+
+from humanizer import docx_edit, extract, humanize, humanize_docx, score, transforms, writeback  # noqa: E402,E501
 from humanizer.data import AI_PHRASES, AI_WORDS  # noqa: E402
 
 SAMPLE = (
@@ -99,6 +102,61 @@ def test_data_maps_are_clean():
         assert k != v
     for k in AI_PHRASES:
         assert k == k.lower()
+
+
+def _make_formatted_docx() -> bytes:
+    """Build a .docx with a Heading style, a bold run, and an extra part."""
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>"
+        # heading (short -> should be left untouched)
+        '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+        "<w:r><w:t>Introduction</w:t></w:r></w:p>"
+        # body paragraph: a bold lead-in run + a longer normal run
+        "<w:p>"
+        '<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Furthermore, </w:t></w:r>'
+        "<w:r><w:t>it is important to note that we must leverage robust "
+        "solutions to delve into seamless workflows across many industries.</w:t></w:r>"
+        "</w:p>"
+        "</w:body></w:document>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", "<Types/>")  # dummy but distinct part
+        zf.writestr("word/styles.xml", "<styles>keep me</styles>")
+        zf.writestr("word/document.xml", document)
+    return buf.getvalue()
+
+
+def test_docx_preserves_formatting():
+    raw = _make_formatted_docx()
+    rewrite = lambda t: transforms.humanize_rules(t, seed=1)  # noqa: E731
+    new_bytes, orig, new = docx_edit.humanize_docx_bytes(raw, rewrite, min_words=5)
+
+    zf = zipfile.ZipFile(io.BytesIO(new_bytes))
+    doc = zf.read("word/document.xml").decode("utf-8")
+
+    # formatting markup survives
+    assert "<w:b/>" in doc, "bold run property was lost"
+    assert 'w:pStyle w:val="Heading1"' in doc, "heading style was lost"
+    # untouched sibling parts survive byte-for-byte
+    assert zf.read("word/styles.xml").decode() == "<styles>keep me</styles>"
+    # heading text (short) left alone; body text humanized
+    assert "Introduction" in doc
+    assert "delve" not in doc.lower()
+    assert "furthermore" not in doc.lower()
+
+
+def test_docx_pipeline_rules_mode():
+    raw = _make_formatted_docx()
+    new_bytes, result = humanize_docx(raw, mode="rules")
+    assert result.mode == "rules"
+    assert result.after.ai_like <= result.before.ai_like
+    # still a readable docx
+    text = extract.read_docx(io.BytesIO(new_bytes))
+    assert "Introduction" in text
+    assert new_bytes[:2] == b"PK"  # valid zip
 
 
 def _run_all():

@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from . import transforms
+from . import docx_edit, transforms
 from .llm import LLMConfig, LLMError, LocalLLM
 from .score import Score, score, verdict
 
@@ -137,3 +137,79 @@ def humanize(
         after=after,
         warnings=warnings,
     )
+
+
+def _resolve_llm_mode(mode, llm, llm_config, warnings):
+    """Return (effective_mode, llm) after checking the model is reachable."""
+    if mode in ("hybrid", "llm"):
+        llm = llm or LocalLLM(llm_config)
+        if not llm.is_available():
+            warnings.append(
+                "No local LLM reachable - falling back to the rule engine. "
+                "Start Ollama (or your OpenAI-compatible server) for best quality."
+            )
+            return "rules", llm
+    return mode, llm
+
+
+def _paragraph_rewriter(effective_mode, llm, warnings, seed, burstiness_strength):
+    """Build a per-paragraph text->text function for the given mode."""
+    def rewrite(text: str) -> str:
+        if not text.strip():
+            return text
+        if effective_mode in ("llm", "hybrid"):
+            try:
+                out = llm.humanize(text)
+            except LLMError as exc:
+                warnings.append(f"LLM failed on a paragraph, kept original: {exc}")
+                return text
+            if effective_mode == "hybrid":
+                out = transforms.humanize_rules(
+                    out,
+                    seed=seed,
+                    synonym_rate=0.0,
+                    burstiness_strength=burstiness_strength * 0.4,
+                    do_synonyms=False,
+                )
+            return out
+        return transforms.humanize_rules(
+            text, seed=seed, burstiness_strength=burstiness_strength
+        )
+
+    return rewrite
+
+
+def humanize_docx(
+    raw: bytes,
+    *,
+    mode: str = "hybrid",
+    llm: LocalLLM | None = None,
+    llm_config: LLMConfig | None = None,
+    seed: int | None = None,
+    burstiness_strength: float = 0.5,
+    min_words: int = 5,
+) -> tuple[bytes, HumanizeResult]:
+    """Humanize a .docx **in place**, preserving all formatting.
+
+    Returns ``(new_docx_bytes, result)`` where ``result`` carries the
+    concatenated before/after text and scores.
+    """
+    warnings: list[str] = []
+    effective_mode, llm = _resolve_llm_mode(mode, llm, llm_config, warnings)
+    rewrite = _paragraph_rewriter(
+        effective_mode, llm, warnings, seed, burstiness_strength
+    )
+
+    new_bytes, orig_text, new_text = docx_edit.humanize_docx_bytes(
+        raw, rewrite, min_words=min_words
+    )
+
+    result = HumanizeResult(
+        original=orig_text,
+        humanized=new_text,
+        mode=effective_mode,
+        before=score(orig_text),
+        after=score(new_text),
+        warnings=warnings,
+    )
+    return new_bytes, result
