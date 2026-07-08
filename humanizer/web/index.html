@@ -381,6 +381,7 @@ footer .disc{border-top:1px solid var(--glass-brd);padding-top:22px}
 const $=id=>document.getElementById(id);
 let uploaded=null; // {name,b64}
 let resultDocx=null; // formatting-preserved .docx (base64) from the server
+let lastWasDocxUpload=false; // did the current result come from a .docx upload?
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show');
   clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2600); }
@@ -448,6 +449,7 @@ $('go').onclick=async()=>{
 
   const body={mode:$('mode').value,engine:$('engine').value,model:$('model').value,
     base_url:$('baseUrl').value,temperature:parseFloat($('temp').value)};
+  const wasDocx=!!(uploaded && uploaded.name.toLowerCase().endsWith('.docx'));
   if(uploaded){ body.file_b64=uploaded.b64; body.filename=uploaded.name; } else { body.text=text; }
 
   try{
@@ -456,7 +458,12 @@ $('go').onclick=async()=>{
     if(d.error){ $('warns').innerHTML='<div class="warn">'+d.error+'</div>'; }
     else{
       resultDocx=d.docx_b64||null;
+      lastWasDocxUpload=wasDocx;
       $('dlDocx').textContent=resultDocx?'Download .docx ✓ formatted':'Download .docx';
+      if(wasDocx && !resultDocx){
+        $('warns').innerHTML='<div class="warn">Your local server looks out of date — it didn\'t return a formatted file. '
+          +'Stop it (Ctrl+C) and run <b>python -m humanizer --serve</b> again to keep your Word formatting.</div>';
+      }
       $('outText').value=d.humanized;
       $('outPlaceholder').style.display='none';
       const sp=$('scorePanel'); sp.style.display='block'; sp.classList.remove('reveal'); void sp.offsetWidth; sp.classList.add('reveal');
@@ -483,6 +490,10 @@ $('dlDocx').onclick=async()=>{
     const bin=atob(resultDocx), arr=new Uint8Array(bin.length);
     for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
     download('humanized.docx',new Blob([arr],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}));
+    return;
+  }
+  if(lastWasDocxUpload){ // never hand back a formatting-stripped rebuild of an uploaded doc
+    toast('Restart the server to get your formatting back — see the note above.');
     return;
   }
   if(!$('outText').value){toast('Nothing to download yet.');return;}
