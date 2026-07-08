@@ -27,6 +27,22 @@ import re
 import zipfile
 from xml.sax.saxutils import escape, unescape
 
+# Parts of a .docx that carry visible WordprocessingML paragraph text and are
+# therefore worth humanizing: the body, comments, foot/endnotes, and every
+# header/footer. (Text boxes live inside document.xml, so they're covered by
+# the body.) Everything else - styles, numbering, settings, metadata - is left
+# byte-for-byte untouched.
+_TEXT_PART_RE = re.compile(
+    r"^word/("
+    r"document\.xml"
+    r"|comments\.xml"
+    r"|footnotes\.xml"
+    r"|endnotes\.xml"
+    r"|header\d+\.xml"
+    r"|footer\d+\.xml"
+    r")$"
+)
+
 # Matches, in document order:
 #   * a paragraph open tag  <w:p ...>   (selfclose captured for <w:p/>)
 #   * a paragraph close tag </w:p>
@@ -96,29 +112,49 @@ def _rewrite_document_xml(xml: str, rewrite_fn, min_words: int):
     return out, "\n".join(orig_parts), "\n".join(new_parts)
 
 
-def humanize_docx_bytes(raw: bytes, rewrite_fn, *, min_words: int = 5):
+def humanize_docx_bytes(
+    raw: bytes, rewrite_fn, *, min_words: int = 5, body_only: bool = False
+):
     """Humanize a .docx (given as bytes), preserving all formatting.
+
+    By default this rewrites the body **and** comments, footnotes, endnotes,
+    headers and footers. Set ``body_only=True`` to touch only the main body.
 
     Returns ``(new_docx_bytes, original_text, humanized_text)``.
     """
     src = zipfile.ZipFile(io.BytesIO(raw))
-    try:
-        document = src.read("word/document.xml").decode("utf-8")
-    except KeyError as exc:
+    if "word/document.xml" not in src.namelist():
         src.close()
-        raise ValueError("Not a valid .docx (missing word/document.xml).") from exc
+        raise ValueError("Not a valid .docx (missing word/document.xml).")
 
-    new_document, orig_text, new_text = _rewrite_document_xml(
-        document, rewrite_fn, min_words
-    )
+    def _is_target(name: str) -> bool:
+        if body_only:
+            return name == "word/document.xml"
+        return bool(_TEXT_PART_RE.match(name))
+
+    edited: dict[str, str] = {}
+    orig_parts: list[str] = []
+    new_parts: list[str] = []
+
+    for name in src.namelist():
+        if not _is_target(name):
+            continue
+        xml = src.read(name).decode("utf-8")
+        new_xml, orig_text, new_text = _rewrite_document_xml(
+            xml, rewrite_fn, min_words
+        )
+        edited[name] = new_xml
+        if orig_text.strip():
+            orig_parts.append(orig_text)
+            new_parts.append(new_text)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for item in src.infolist():
             data = src.read(item.filename)
-            if item.filename == "word/document.xml":
-                data = new_document.encode("utf-8")
+            if item.filename in edited:
+                data = edited[item.filename].encode("utf-8")
             # Preserve each part's original ZipInfo (name, date, compression).
             dst.writestr(item, data)
     src.close()
-    return buf.getvalue(), orig_text, new_text
+    return buf.getvalue(), "\n".join(orig_parts), "\n".join(new_parts)

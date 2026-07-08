@@ -188,8 +188,12 @@ def humanize_docx(
     seed: int | None = None,
     burstiness_strength: float = 0.5,
     min_words: int = 5,
+    body_only: bool = False,
 ) -> tuple[bytes, HumanizeResult]:
     """Humanize a .docx **in place**, preserving all formatting.
+
+    By default the body plus comments, footnotes, endnotes, headers and footers
+    are rewritten; pass ``body_only=True`` to limit it to the main body.
 
     Returns ``(new_docx_bytes, result)`` where ``result`` carries the
     concatenated before/after text and scores.
@@ -201,7 +205,7 @@ def humanize_docx(
     )
 
     new_bytes, orig_text, new_text = docx_edit.humanize_docx_bytes(
-        raw, rewrite, min_words=min_words
+        raw, rewrite, min_words=min_words, body_only=body_only
     )
 
     result = HumanizeResult(

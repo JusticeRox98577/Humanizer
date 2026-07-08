@@ -148,6 +148,48 @@ def test_docx_preserves_formatting():
     assert "furthermore" not in doc.lower()
 
 
+def _docx_with_comment() -> bytes:
+    """A .docx whose body, a comment, a footnote and a header all carry text."""
+    ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    para = lambda txt: f"<w:p><w:r><w:t>{txt}</w:t></w:r></w:p>"  # noqa: E731
+    tell = ("Furthermore, it is important to note that we must leverage robust "
+            "solutions to delve into seamless workflows across many industries.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", f"<w:document {ns}><w:body>{para(tell)}</w:body></w:document>")
+        zf.writestr("word/comments.xml",
+            f'<w:comments {ns}><w:comment w:id="1" w:author="A">{para(tell)}</w:comment></w:comments>')
+        zf.writestr("word/footnotes.xml",
+            f'<w:footnotes {ns}><w:footnote w:id="1">{para(tell)}</w:footnote></w:footnotes>')
+        zf.writestr("word/header1.xml", f"<w:hdr {ns}>{para(tell)}</w:hdr>")
+        zf.writestr("word/styles.xml", "<w:styles>keep</w:styles>")
+    return buf.getvalue()
+
+
+def test_docx_humanizes_comments_and_notes():
+    raw = _docx_with_comment()
+    rewrite = lambda t: transforms.humanize_rules(t, seed=1)  # noqa: E731
+    new_bytes, orig, new = docx_edit.humanize_docx_bytes(raw, rewrite, min_words=5)
+    zf = zipfile.ZipFile(io.BytesIO(new_bytes))
+    for part in ("word/document.xml", "word/comments.xml",
+                 "word/footnotes.xml", "word/header1.xml"):
+        body = zf.read(part).decode().lower()
+        assert "delve" not in body, f"{part} not humanized"
+        assert "furthermore" not in body, f"{part} not humanized"
+    # comment/footnote structure preserved
+    assert 'w:author="A"' in zf.read("word/comments.xml").decode()
+    assert zf.read("word/styles.xml").decode() == "<w:styles>keep</w:styles>"
+
+
+def test_docx_body_only_leaves_comments():
+    raw = _docx_with_comment()
+    rewrite = lambda t: transforms.humanize_rules(t, seed=1)  # noqa: E731
+    new_bytes, *_ = docx_edit.humanize_docx_bytes(raw, rewrite, min_words=5, body_only=True)
+    zf = zipfile.ZipFile(io.BytesIO(new_bytes))
+    assert "delve" not in zf.read("word/document.xml").decode().lower()
+    assert "delve" in zf.read("word/comments.xml").decode().lower()  # untouched
+
+
 def test_docx_pipeline_rules_mode():
     raw = _make_formatted_docx()
     new_bytes, result = humanize_docx(raw, mode="rules")

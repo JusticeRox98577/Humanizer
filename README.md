@@ -104,6 +104,11 @@ bullet/numbered lists, tables and images all survive; only the words inside each
 paragraph change. Short lines (headings, labels — anything under ~5 words) are
 left exactly as they were so your titles don't get reworded.
 
+It also rewrites the text in **comments, footnotes, endnotes, headers and
+footers** — not just the main body. (Comment authors, dates and threading are
+left untouched; only the comment text changes.) Pass `--body-only` if you want
+the body alone.
+
 One caveat: if a single paragraph mixes formatting (say, one bold word in the
 middle of a normal sentence), the rewritten paragraph takes on that paragraph's
 *dominant* run formatting, since the words themselves change and can't be mapped
@@ -155,6 +160,7 @@ python -m humanizer [input] [options]
   --seed INT                  reproducible output
   --synonym-rate FLOAT        0-1, how often to swap synonyms (rules)
   --burstiness FLOAT          0-1, sentence-rhythm variation strength
+  --body-only                 .docx: skip comments/footnotes/headers/footers
   --quiet                     suppress the score report
 
   --serve / --port            launch the web UI

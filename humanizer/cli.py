@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--synonym-rate", type=float, default=0.35)
     t.add_argument("--burstiness", type=float, default=0.5)
     t.add_argument("--quiet", action="store_true", help="Suppress the score report")
+    t.add_argument(
+        "--body-only",
+        action="store_true",
+        help="For .docx: humanize only the main body, not comments/footnotes/"
+        "headers/footers (which are included by default)",
+    )
 
     p.add_argument("--serve", action="store_true", help="Launch the web UI instead")
     p.add_argument("--port", type=int, default=8000, help="Port for --serve")
@@ -128,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
                 llm=llm,
                 seed=args.seed,
                 burstiness_strength=args.burstiness,
+                body_only=args.body_only,
             )
             Path(out_path).write_bytes(new_bytes)
             for w in result.warnings:
