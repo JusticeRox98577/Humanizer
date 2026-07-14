@@ -127,6 +127,35 @@ python -m humanizer essay.txt \
 
 ---
 
+## Run it as a Windows app
+
+No `cd`, no server to restart, no browser tab to manage — just launch it.
+
+**Easiest (no build):** double-click **`Humanizer.bat`** in the repo folder. It
+starts the app and opens the UI. (Keep the small console window open while you
+use it; close it to stop.)
+
+**Nicer — a real app window:** install pywebview once, then the same launcher
+opens a native window instead of a browser:
+
+```bash
+pip install pywebview
+python -m humanizer --app
+```
+
+**Best — a single double-clickable `Humanizer.exe`** you can pin to your
+taskbar (no Python needed to run it afterwards):
+
+```bash
+pip install pyinstaller pywebview
+python build_windows.py
+# -> dist\Humanizer.exe
+```
+
+The `.exe` bundles the UI and an app icon. It still talks to your local Ollama
+for the model, so start Ollama for the high-quality rewrite (rules mode works
+without it).
+
 ## Web UI
 
 ```bash

@@ -82,12 +82,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument("--serve", action="store_true", help="Launch the web UI instead")
+    p.add_argument(
+        "--app",
+        action="store_true",
+        help="Launch as a desktop app (native window if pywebview is installed, "
+        "else your browser) — no cd, no server to restart",
+    )
     p.add_argument("--port", type=int, default=8000, help="Port for --serve")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.app:
+        from .desktop import run_app
+
+        run_app()
+        return 0
 
     if args.serve:
         from .server import serve

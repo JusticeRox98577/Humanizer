@@ -201,6 +201,20 @@ def test_docx_pipeline_rules_mode():
     assert new_bytes[:2] == b"PK"  # valid zip
 
 
+def test_desktop_server_serves_ui():
+    import urllib.request
+
+    from humanizer.desktop import start_background_server
+
+    httpd, url = start_background_server()
+    try:
+        html = urllib.request.urlopen(url, timeout=5).read().decode()
+        assert 'id="net"' in html  # the 3D canvas
+        assert "sound human" in html.lower()
+    finally:
+        httpd.shutdown()
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import sys
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,7 +27,12 @@ from .llm import LLMConfig, LocalLLM
 from .score import verdict
 from .writeback import _CONTENT_TYPES, _DOC_HEAD, _DOC_TAIL, _RELS, _paragraph_xml
 
-_WEB_DIR = Path(__file__).resolve().parent / "web"
+# When frozen into a Windows .exe by PyInstaller, data files live under
+# sys._MEIPASS; otherwise they sit next to this module.
+if getattr(sys, "frozen", False):
+    _WEB_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "humanizer" / "web"
+else:
+    _WEB_DIR = Path(__file__).resolve().parent / "web"
 
 # Minimal fallback shown only if web/index.html is somehow missing.
 _FALLBACK = (
